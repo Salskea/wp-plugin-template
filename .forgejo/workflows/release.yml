@@ -1,0 +1,132 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: PHP syntax check
+        run: find . -name "*.php" -not -path "./.git/*" | xargs php -l
+
+      - name: Version sync check
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          MAIN_FILE=$(grep -rl "Plugin Name:" --include="*.php" . | grep -v vendor | head -1)
+          VERSION=$(head -1 VERSION)
+          HEADER_VER=$(grep -m1 "^\* Version:" "$MAIN_FILE" | sed 's/.*Version: *//')
+          CONST_VER=$(grep -m1 "define.*_VERSION.*'" "$MAIN_FILE" | sed "s/.*'\(.*\)'.*/\1/")
+          CLASS_FILE=$(find includes -name "class-*.php" 2>/dev/null | grep -v activator | grep -v deactivator | grep -v loader | grep -v i18n | head -1)
+          CLASS_VER=""
+          [ -n "$CLASS_FILE" ] && CLASS_VER=$(grep -m1 "this->version = '" "$CLASS_FILE" 2>/dev/null | sed "s/.*'\(.*\)'.*/\1/")
+
+          ERRORS=0
+          check() {
+            if [ "$1" != "$TAG_VERSION" ]; then
+              echo "❌ $2: expected $TAG_VERSION, got $1"
+              ERRORS=1
+            fi
+          }
+
+          check "$VERSION"    "VERSION file"
+          check "$HEADER_VER" "Plugin header Version:"
+          check "$CONST_VER"  "Version constant"
+          [ -n "$CLASS_VER" ] && check "$CLASS_VER" "Class version fallback"
+
+          if ! grep -qF "## [$TAG_VERSION]" CHANGELOG.md; then
+            echo "❌ CHANGELOG.md has no entry for [$TAG_VERSION]"
+            ERRORS=1
+          fi
+          if [ $ERRORS -ne 0 ]; then exit 1; fi
+          echo "✅ All version checks passed: $TAG_VERSION"
+
+      - name: Build plugin zip
+        run: |
+          VERSION=$(head -1 VERSION)
+          MAIN_FILE=$(grep -rl "Plugin Name:" --include="*.php" . | grep -v vendor | head -1)
+          SLUG=$(basename "$MAIN_FILE" .php)
+          ZIP_NAME="${SLUG}-v${VERSION}.zip"
+          BUILD_DIR=$(mktemp -d)
+          DEST="${BUILD_DIR}/${SLUG}"
+
+          rsync -a \
+            --exclude='.git' \
+            --exclude='.github' \
+            --exclude='.forgejo' \
+            --exclude='.claude' \
+            --exclude='_bmad' \
+            --exclude='_bmad-output' \
+            --exclude='docs' \
+            --exclude='.DS_Store' \
+            --exclude='CLAUDE.md' \
+            --exclude='CHANGELOG.md' \
+            --exclude='VERSION' \
+            --exclude='version-bump.sh' \
+            --exclude='setup.sh' \
+            --exclude='*.sh' \
+            --exclude='*.zip' \
+            . "$DEST/"
+
+          cd "$BUILD_DIR"
+          zip -r "$ZIP_NAME" "$SLUG/" -x "**/.DS_Store"
+          mv "$ZIP_NAME" "$GITHUB_WORKSPACE/"
+
+          echo "ZIP_NAME=$ZIP_NAME" >> "$GITHUB_ENV"
+          echo "PLUGIN_VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Extract release notes from CHANGELOG.md
+        run: |
+          VERSION=$(head -1 VERSION)
+          NOTES=$(awk "/^## \[$VERSION\]/{found=1; next} found && /^## \[/{exit} found{print}" CHANGELOG.md | sed '/^[[:space:]]*$/d')
+          { echo "RELEASE_NOTES<<EOF"; echo "$NOTES"; echo "EOF"; } >> "$GITHUB_ENV"
+
+      - name: Create Forgejo Release
+        env:
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          REMOTE_URL=$(git remote get-url origin)
+
+          # Parse owner/repo from SSH or HTTPS remote URL
+          if [[ "$REMOTE_URL" =~ git@git\.kuhnia\.fi:([^/]+)/(.+)\.git$ ]]; then
+            OWNER="${BASH_REMATCH[1]}"
+            REPO="${BASH_REMATCH[2]}"
+          elif [[ "$REMOTE_URL" =~ https://git\.kuhnia\.fi/([^/]+)/([^/]+)(\.git)?$ ]]; then
+            OWNER="${BASH_REMATCH[1]}"
+            REPO="${BASH_REMATCH[2]}"
+          else
+            echo "❌ Cannot parse owner/repo from remote: $REMOTE_URL"
+            exit 1
+          fi
+
+          API="https://git.kuhnia.fi/api/v1"
+
+          # JSON-encode release notes safely using python3
+          NOTES_JSON=$(python3 -c "import json,sys; print(json.dumps(sys.stdin.read()))" \
+            <<< "${{ env.RELEASE_NOTES }}")
+
+          echo "Creating release $TAG for $OWNER/$REPO..."
+          RESPONSE=$(curl -sf -X POST "$API/repos/$OWNER/$REPO/releases" \
+            -H "Authorization: token $RELEASE_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "{\"tag_name\":\"$TAG\",\"name\":\"$TAG\",\"body\":$NOTES_JSON,\"draft\":false,\"prerelease\":false}")
+
+          RELEASE_ID=$(python3 -c "import json,sys; print(json.load(sys.stdin)['id'])" <<< "$RESPONSE")
+
+          if [ -z "$RELEASE_ID" ]; then
+            echo "❌ Failed to create release. Response: $RESPONSE"
+            exit 1
+          fi
+
+          echo "Uploading $ZIP_NAME..."
+          curl -sf -X POST "$API/repos/$OWNER/$REPO/releases/$RELEASE_ID/assets" \
+            -H "Authorization: token $RELEASE_TOKEN" \
+            -F "attachment=@${{ env.ZIP_NAME }}"
+
+          echo "✅ Release created: https://git.kuhnia.fi/$OWNER/$REPO/releases/tag/$TAG"
