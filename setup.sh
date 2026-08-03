@@ -24,7 +24,11 @@ usage() {
 
 # Derive all variants
 PLUGIN_UNDERSCORE="${PLUGIN_SLUG//-/_}"
-PLUGIN_CLASS=$(echo "$PLUGIN_SLUG" | sed 's/-\([a-z]\)/\U\1/g; s/^\([a-z]\)/\U\1/')
+# awk, not sed: sed's \U is a GNU extension and BSD sed (macOS) emits a literal U
+PLUGIN_CLASS=$(echo "$PLUGIN_SLUG" | awk -F- 'BEGIN{OFS="_"} {for(i=1;i<=NF;i++) $i=toupper(substr($i,1,1)) substr($i,2)} 1')
+# In a sed replacement & means "the whole match", so a title like "Foo & Bar"
+# would reinsert the placeholder. Escape it (and / \) for the sed passes only.
+PLUGIN_TITLE_SED=$(printf '%s' "$PLUGIN_TITLE" | sed 's/[&/\]/\\&/g')
 TODAY=$(date +%Y-%m-%d)
 
 echo -e "${YELLOW}Setting up WordPress plugin:${NC}"
@@ -43,12 +47,12 @@ find . -type f \( -name "*.php" -o -name "*.css" -o -name "*.js" -o -name "*.md"
     -not -path "./.git/*" \
     -not -name "setup.sh" | while read -r file; do
     sed -i '' \
-        -e "s/Plugin Name Here/$PLUGIN_TITLE/g" \
+        -e "s/Plugin Name Here/$PLUGIN_TITLE_SED/g" \
         -e "s/PLUGIN_NAME/$PLUGIN_CONST/g" \
         -e "s/Plugin_Name/$PLUGIN_CLASS/g" \
         -e "s/plugin_name/$PLUGIN_UNDERSCORE/g" \
         -e "s/plugin-name/$PLUGIN_SLUG/g" \
-        -e "s/Plugin Author/$PLUGIN_TITLE/g" \
+        -e "s/Plugin Author/$PLUGIN_TITLE_SED/g" \
         "$file"
 done
 
