@@ -4,6 +4,13 @@ Pohjan muutokset. Muoto perustuu [Keep a Changelogiin](https://keepachangelog.co
 
 ## [Unreleased]
 
+## [2.0.1] - 2026-10-28
+
+### Korjattu
+
+- PHPCS ei enää estä testejä lukemasta `tests/fixtures/`-tiedostoja (`file_get_contents`):
+  `WordPress.WP.AlternativeFunctions` ohitetaan `tests/`-hakemistossa.
+
 ## [2.0.0] - 2026-10-28
 
 ### Muutettu

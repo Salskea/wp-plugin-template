@@ -49,4 +49,8 @@
 	<rule ref="WordPress.NamingConventions.PrefixAllGlobals">
 		<exclude-pattern>/tests/*</exclude-pattern>
 	</rule>
+	<!-- Tests read fixtures from disk; WordPress' remote/filesystem APIs are not loaded there. -->
+	<rule ref="WordPress.WP.AlternativeFunctions">
+		<exclude-pattern>/tests/*</exclude-pattern>
+	</rule>
 </ruleset>
