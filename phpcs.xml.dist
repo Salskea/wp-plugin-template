@@ -1,0 +1,52 @@
+<?xml version="1.0"?>
+<ruleset name="salskea-skeleton">
+	<description>WordPress Coding Standards (Extra), Salskea conventions.</description>
+
+	<file>.</file>
+	<exclude-pattern>/vendor/*</exclude-pattern>
+	<exclude-pattern>/dist/*</exclude-pattern>
+
+	<arg name="extensions" value="php"/>
+	<arg name="colors"/>
+	<arg value="sp"/>
+
+	<config name="minimum_wp_version" value="6.5"/>
+	<config name="testVersion" value="8.2-"/>
+
+	<rule ref="WordPress-Extra">
+		<!-- Salskea style: short array syntax, Yoda conditions optional. -->
+		<exclude name="Universal.Arrays.DisallowShortArraySyntax"/>
+		<exclude name="WordPress.PHP.YodaConditions"/>
+	</rule>
+
+	<!-- In the full WordPress standard but not in Extra: unvalidated/unsanitized $_POST, $_GET... -->
+	<rule ref="WordPress.Security.ValidatedSanitizedInput"/>
+
+	<rule ref="WordPress.WP.I18n">
+		<properties>
+			<property name="text_domain" type="array">
+				<element value="salskea-skeleton"/>
+			</property>
+		</properties>
+	</rule>
+
+	<rule ref="WordPress.NamingConventions.PrefixAllGlobals">
+		<properties>
+			<property name="prefixes" type="array">
+				<element value="salskea_skeleton"/>
+				<element value="Salskea\Skeleton"/>
+			</property>
+		</properties>
+	</rule>
+
+	<!-- Tests follow PHPUnit conventions (PSR-4 file names, setUp/tearDown). -->
+	<rule ref="WordPress.Files.FileName">
+		<exclude-pattern>/tests/*</exclude-pattern>
+	</rule>
+	<rule ref="WordPress.NamingConventions.ValidFunctionName.MethodNameInvalid">
+		<exclude-pattern>/tests/*</exclude-pattern>
+	</rule>
+	<rule ref="WordPress.NamingConventions.PrefixAllGlobals">
+		<exclude-pattern>/tests/*</exclude-pattern>
+	</rule>
+</ruleset>

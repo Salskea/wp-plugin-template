@@ -2,47 +2,74 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: ["**"]
   pull_request:
-    branches: [main]
 
 jobs:
-  validate:
+  check:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ["8.2", "8.3", "8.4"]
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: PHP syntax check
-        run: find . -name "*.php" -not -path "./.git/*" | xargs php -l
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
 
-      - name: Version sync check
+      - name: Composer-tiedostot (lock ajan tasalla)
+        run: composer validate --strict
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/composer
+          key: composer-${{ matrix.php }}-${{ hashFiles('composer.lock') }}
+
+      - run: composer install --prefer-dist --no-progress
+
+      - name: Koodityyli (PHPCS)
+        run: composer lint
+
+      - name: Staattinen analyysi (PHPStan)
+        run: composer analyse
+
+      - name: Testit (PHPUnit)
+        run: composer test
+
+      # The template repo carries its own CHANGELOG, not the skeleton plugin's.
+      - name: Versio sama kaikkialla
+        if: github.repository != 'Salskea/wp-plugin-template'
+        run: ./scripts/check-version.sh
+
+  # Pushing a new version to main creates the tag and starts the release. A tag pushed with
+  # GITHUB_TOKEN does not trigger workflows, so release.yml is dispatched explicitly.
+  tag:
+    needs: check
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository != 'Salskea/wp-plugin-template'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tagi, jos versio on uusi
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          MAIN_FILE=$(grep -rl "Plugin Name:" --include="*.php" . | grep -v vendor | head -1)
-          if [ -z "$MAIN_FILE" ]; then
-            echo "❌ Could not find main plugin PHP file"
-            exit 1
+          source scripts/lib.sh
+          TAG="v$(header_version)"
+
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" > /dev/null; then
+            echo "Tagi $TAG on jo olemassa."
+          else
+            git tag "$TAG"
+            git push origin "$TAG"
+            gh workflow run release.yml --ref "$TAG"
+            echo "Luotiin $TAG ja käynnistettiin release.yml."
           fi
-          echo "Main plugin file: $MAIN_FILE"
-
-          VERSION=$(head -1 VERSION)
-          HEADER_VER=$(grep -m1 "^\* Version:" "$MAIN_FILE" | sed 's/.*Version: *//')
-          CONST_VER=$(grep -m1 "define.*_VERSION.*'" "$MAIN_FILE" | sed "s/.*'\(.*\)'.*/\1/")
-          CLASS_FILE=$(find includes -name "class-*.php" 2>/dev/null | grep -v activator | grep -v deactivator | grep -v loader | grep -v i18n | head -1)
-          CLASS_VER=""
-          [ -n "$CLASS_FILE" ] && CLASS_VER=$(grep -m1 "this->version = '" "$CLASS_FILE" 2>/dev/null | sed "s/.*'\(.*\)'.*/\1/")
-
-          ERRORS=0
-          check() {
-            if [ -n "$1" ] && [ "$1" != "$VERSION" ]; then
-              echo "❌ $2: expected $VERSION, got $1"
-              ERRORS=1
-            fi
-          }
-
-          check "$HEADER_VER" "Plugin header Version:"
-          check "$CONST_VER"  "Version constant"
-          check "$CLASS_VER"  "Class version fallback"
-
-          if [ $ERRORS -ne 0 ]; then exit 1; fi
-          echo "✅ All version locations in sync: $VERSION"
