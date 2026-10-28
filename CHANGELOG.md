@@ -4,6 +4,8 @@ Pohjan muutokset. Muoto perustuu [Keep a Changelogiin](https://keepachangelog.co
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-10-28
+
 ### Muutettu
 
 - Pohja kirjoitettu kokonaan uudelleen Salskean lisäosamallin mukaiseksi: namespace ja composer
