@@ -1,0 +1,42 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    if: github.repository != 'Salskea/wp-plugin-template' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"
+          coverage: none
+
+      - name: Versio vastaa tagia
+        run: ./scripts/check-version.sh "${GITHUB_REF_NAME#v}"
+
+      - run: composer install --prefer-dist --no-progress
+
+      - name: Tarkistukset
+        run: composer check
+
+      - name: Zip
+        run: ./scripts/build-zip.sh
+
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          awk -v v="$VERSION" '$0 ~ "^## \\[" v "\\]" {found=1; next} found && /^## \[/ {exit} found {print}' \
+            CHANGELOG.md > release-notes.md
+          gh release create "$GITHUB_REF_NAME" dist/*.zip --title "$GITHUB_REF_NAME" --notes-file release-notes.md
